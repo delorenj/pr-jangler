@@ -1,0 +1,11 @@
+{
+  "name": "pr-jangler",
+  "description": "Autonomous GitHub PR backlog workflow — cron-driven discovery, triage, claim-verification, review, fix-planning, adversarial validation, fix-implementation, decision, and daily reporting.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Jarad DeLorenzo"
+  },
+  "homepage": "https://github.com/delorenj/pr-jangler",
+  "repository": "https://github.com/delorenj/pr-jangler",
+  "license": "MIT"
+}

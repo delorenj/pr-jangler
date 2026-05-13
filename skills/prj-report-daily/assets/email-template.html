@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>$subject</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;color:#1f2933;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#f4f5f7;padding:24px 0;">
+  <tr>
+    <td align="center">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="640" style="max-width:640px;background:#ffffff;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);overflow:hidden;">
+        <tr>
+          <td style="padding:24px 32px;background:#0b3d91;color:#ffffff;">
+            <h1 style="margin:0;font-size:20px;font-weight:600;letter-spacing:0.2px;">PR Jangler Daily Report</h1>
+            <p style="margin:6px 0 0 0;font-size:13px;color:#cdd9ed;">$report_date &middot; repo $repo</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:24px 32px;">
+            <p style="margin:0 0 16px 0;font-size:15px;line-height:1.5;">$intro</p>
+            $shortlist_block
+            $needs_attention_block
+            $in_progress_block
+            $resolved_today_block
+            $no_change_block
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:16px 32px 24px 32px;border-top:1px solid #e4e7eb;font-size:12px;color:#7b8794;">
+            Generated $generated_at &middot; archive: $archive_path
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>

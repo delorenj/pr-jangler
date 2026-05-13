@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "PR Jangler State Queue",
+  "description": "Persistent state for the prj-orchestrator heartbeat. Owned by prj-orchestrator/scripts/state_io.py. All phase skills MUST read/write through that module.",
+  "type": "object",
+  "required": ["version", "repo", "last_updated", "heartbeat_count", "prs"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "type": "string", "const": "1.0" },
+    "repo": { "type": "string", "description": "Target repo in owner/name format" },
+    "last_updated": { "type": "string", "format": "date-time" },
+    "heartbeat_count": { "type": "integer", "minimum": 0 },
+    "last_report_sent": { "type": ["string", "null"], "format": "date-time" },
+    "prs": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {
+        "^[0-9]+$": {
+          "type": "object",
+          "required": [
+            "pr_number", "phase", "phase_entered_at",
+            "last_action_at", "contributor_login"
+          ],
+          "properties": {
+            "pr_number": { "type": "integer", "minimum": 1 },
+            "phase": {
+              "type": "string",
+              "enum": [
+                "Discovered", "Triaged", "OverlapCheck", "ReviewPending",
+                "Reviewed", "CommentsTriage", "ClaimVerify", "FixPlan",
+                "AdversarialCheck", "FixImpl", "ReadyToMerge", "Blocked",
+                "Rejected", "Archived", "PleaseAdvise"
+              ]
+            },
+            "phase_entered_at": { "type": "string", "format": "date-time" },
+            "last_action_at": { "type": "string", "format": "date-time" },
+            "contributor_login": { "type": "string" },
+            "needs_retriage": { "type": "boolean", "default": false },
+            "new_comments_since_triage": { "type": "integer", "minimum": 0, "default": 0 },
+            "blocking_on": { "type": ["integer", "null"] },
+            "please_advise_reason": { "type": ["string", "null"] },
+            "user_acknowledged_please_advise": { "type": "boolean", "default": false },
+            "next_action": {
+              "type": ["object", "null"],
+              "required": ["skill"],
+              "properties": {
+                "skill": { "type": "string", "pattern": "^prj-" },
+                "mode": { "type": ["string", "null"], "enum": ["pr", "comment", null] }
+              },
+              "additionalProperties": false
+            }
+          }
+        }
+      }
+    }
+  }
+}

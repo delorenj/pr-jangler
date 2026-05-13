@@ -1,0 +1,28 @@
+{
+  "name": "pr-jangler-marketplace",
+  "owner": {
+    "name": "Jarad DeLorenzo"
+  },
+  "metadata": {
+    "description": "PR Jangler — autonomous GitHub PR backlog workflow as a BMad module. Install the full pack, the lightweight hub skill, or copy individual phase skills à la carte."
+  },
+  "plugins": [
+    {
+      "name": "pr-jangler",
+      "source": {
+        "source": "github",
+        "repo": "delorenj/pr-jangler"
+      },
+      "description": "Full pack: cron heartbeat, discovery, triage, verification, review, overlap detection, fix-planning, adversarial validation, fix-implementation, decision, daily reporting, and the hub orientation skill."
+    },
+    {
+      "name": "pr-jangler-hub",
+      "source": {
+        "source": "github",
+        "repo": "delorenj/pr-jangler",
+        "path": "skills/pr-jangler"
+      },
+      "description": "Hub skill only — routing knowledge and operating principles for PR Jangler without the phase scripts. Use to orient an agent on the workflow, then install individual phase skills as needed."
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+# PR Jangler GitHub labels. One per line. Format: name|color|description
+# Color is a 6-char hex without #. Comments and blank lines are ignored.
+# Applied to the repo configured as prj_repo.
+
+# Triage classifications (set by prj-triage in PR-mode)
+prj/triage:actionable|0E8A16|PR Jangler: substantive change ready for review pipeline
+prj/triage:definite-no|B60205|PR Jangler: matches a definite-no pattern (deprecated API, conventions violation, etc.)
+prj/triage:duplicate-candidate|FBCA04|PR Jangler: shares files or scope with another open PR (will be checked by detect-overlap)
+prj/triage:needs-review|D4C5F9|PR Jangler: ambiguous; flagged for human triage
+
+# Overlap verdicts (set by prj-detect-overlap)
+prj/overlap:duplicate|B60205|PR Jangler: redundant with another open PR
+prj/overlap:conflicts-with-other|D93F0B|PR Jangler: conflicts with another open PR (see overlap.md for which one)
+prj/overlap:depends-on-other|FBCA04|PR Jangler: complementary to another PR which should land first
+
+# Decisions (set by prj-decision)
+prj/decision:ready-to-merge|0E8A16|PR Jangler: review passed; recommended for merge
+prj/decision:request-changes|D93F0B|PR Jangler: outstanding findings; changes requested
+prj/decision:close-as-not-now|6A737D|PR Jangler: recommended for close (does not auto-close; user closes manually)
+
+# Fix workflow
+prj/fix-proposed|1D76DB|PR Jangler: a fix-PR has been opened against this PR's branch
+
+# Maintainer overrides (applied manually to override agent classification)
+prj/override:actionable|0E8A16|Maintainer override: treat as actionable on next discover sweep
+prj/override:definite-no|B60205|Maintainer override: treat as definite-no on next discover sweep
+prj/override:duplicate|FBCA04|Maintainer override: treat as duplicate on next discover sweep
+prj/override:needs-review|D4C5F9|Maintainer override: treat as needs-review on next discover sweep
+
+# PleaseAdvise acknowledgment (user applies to dismiss a please-advise entry)
+prj/please-advise-acknowledged|6A737D|User has reviewed the PleaseAdvise entry; orchestrator may resume normal priority

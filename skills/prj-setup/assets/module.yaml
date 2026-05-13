@@ -1,0 +1,110 @@
+code: prj
+name: "PR Jangler"
+description: "Repo-agnostic, cron-driven workflow that triages, reviews, fixes, validates, and reports on open PRs with minimal human touchpoints, with adversarial verification of every requested change."
+module_version: 1.0.0
+default_selected: false
+module_greeting: >
+  PR Jangler is installed. The bot is ready to claw through your PR backlog.
+
+  Run one heartbeat manually (dry-run; observes only):
+    python3 {project-root}/skills/prj-orchestrator/scripts/run.py --dry-run --verbose
+
+  Sample cron entry (every 15 min):
+    */15 * * * * python3 {project-root}/skills/prj-orchestrator/scripts/run.py >> {project-root}/_bmad-output/pr-workflow/logs/cron.log 2>&1
+
+  Before first real run:
+    1. Set prj_repo and prj_bot_user via this setup skill (re-run to update).
+    2. Authenticate gh CLI as the bot user: gh auth login
+    3. Confirm op CLI is signed in: op signin
+    4. Pre-create GitHub labels on the target repo (see assets/labels.txt below).
+    5. Post the sticky consent banner from assets/consent-banner.md as a pinned issue.
+
+prj_repo:
+  prompt: "Which GitHub repo should PR Jangler watch? (owner/name)"
+  required: true
+  example: "delorenj/mcp-server-trello"
+
+prj_bot_user:
+  prompt: "GitHub bot account login that opens fix-PRs"
+  required: true
+  example: "pr-jangler-bot"
+
+prj_bot_token_ref:
+  prompt: "1Password reference for the bot's GitHub PAT"
+  default: "op://DeLoSecrets/prj-bot-token/credential"
+
+prj_bot_email:
+  prompt: "Email address for the bot's Git commits"
+  default: "{prj_bot_user}@users.noreply.github.com"
+
+prj_email_to:
+  prompt: "Where should daily reports go?"
+  default: "jaradd@gmail.com"
+
+prj_email_from:
+  prompt: "Sender address for daily reports"
+  default: "pr-jangler@delo.sh"
+
+prj_smtp_host:
+  prompt: "SMTP host"
+  default: "smtp.gmail.com"
+
+prj_smtp_port:
+  prompt: "SMTP port"
+  default: "587"
+
+prj_smtp_creds_ref:
+  prompt: "1Password reference for SMTP user/pass"
+  default: "op://DeLoSecrets/gmail-smtp"
+
+prj_confidence_threshold:
+  prompt: "Minimum confidence (0-1) to open a fix-PR"
+  default: "0.85"
+
+prj_heartbeat_minutes:
+  prompt: "Cron heartbeat interval in minutes"
+  default: "15"
+
+prj_discover_every_n:
+  prompt: "Run prj-discover every N heartbeats"
+  default: "3"
+
+prj_report_hour_local:
+  prompt: "Local hour to send daily report (0-23)"
+  default: "8"
+
+prj_test_runner:
+  prompt: "Override repo's test runner command (leave blank for auto-detect)"
+  default: ""
+
+prj_post_review_comment:
+  prompt: "Post review summary as a GitHub PR comment? (false = cache only at v1)"
+  default: false
+  type: confirm
+
+prj_maintainer_logins:
+  prompt: "GitHub logins to weight as maintainers (comma-separated; used by triage + close-as-not-now gate)"
+  default: ""
+  user_setting: true
+
+directories:
+  - "{project-root}/_bmad-output/pr-workflow"
+  - "{project-root}/_bmad-output/pr-workflow/prs"
+  - "{project-root}/_bmad-output/pr-workflow/logs"
+  - "{project-root}/_bmad-output/pr-workflow/reports"
+  - "{project-root}/_bmad-output/pr-workflow/worktrees"
+
+post-install-notes: >
+  Setup complete. To ship:
+
+  1. Authenticate the bot account: gh auth login --user {prj_bot_user}
+  2. Verify op CLI: op signin
+  3. Pre-create GitHub labels on {prj_repo} from assets/labels.txt:
+       gh label create --repo {prj_repo} --file {project-root}/skills/prj-setup/assets/labels.txt
+     (script-friendly form; one label per line as "name|color|description")
+  4. Post the sticky consent banner: cat {project-root}/skills/prj-setup/assets/consent-banner.md and create a pinned issue.
+  5. Smoke test:
+       python3 {project-root}/skills/prj-orchestrator/scripts/run.py --dry-run --verbose
+  6. Install the cron entry (see module_greeting).
+
+  Re-run this setup skill anytime to update config.
