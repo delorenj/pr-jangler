@@ -66,6 +66,37 @@ class TestCommandPolicy(unittest.TestCase):
         appr = ApprovalRequest.for_command("r", "curl https://example.com")
         self.assertEqual(self.engine.evaluate(appr).decision, Decision.REQUIRE_HUMAN)
 
+    def test_phase_skill_run_py_auto_approved(self):
+        """Codex's LLM shells out to phase skill scripts during a turn.
+        Those are our own code; they must be on the safe list, else the
+        firewall blocks the skill from doing useful work."""
+        appr = ApprovalRequest.for_command(
+            "r",
+            "python3 /home/u/code/pr-jangler/skills/prj-discover/scripts/run.py "
+            "--project-root /home/u/code/some-repo --verbose",
+        )
+        self.assertEqual(self.engine.evaluate(appr).decision, Decision.AUTO_APPROVE)
+
+    def test_bare_prj_skill_binary_auto_approved(self):
+        appr = ApprovalRequest.for_command("r", "prj-discover")
+        self.assertEqual(self.engine.evaluate(appr).decision, Decision.AUTO_APPROVE)
+        appr2 = ApprovalRequest.for_command("r", "prj-discover --pr-number 42")
+        self.assertEqual(self.engine.evaluate(appr2).decision, Decision.AUTO_APPROVE)
+
+    def test_command_v_lookup_auto_approved(self):
+        """`command -v prj-discover` is the LLM checking PATH — safe."""
+        appr = ApprovalRequest.for_command("r", "command -v prj-discover")
+        self.assertEqual(self.engine.evaluate(appr).decision, Decision.AUTO_APPROVE)
+
+    def test_phase_skill_run_py_with_redirect_into_state_still_denied(self):
+        """The never-allow list must trump even safe-looking prj-skill paths
+        if the redirection target is state.json."""
+        appr = ApprovalRequest.for_command(
+            "r",
+            "python3 /pr-jangler/skills/prj-x/scripts/run.py > state.json",
+        )
+        self.assertEqual(self.engine.evaluate(appr).decision, Decision.AUTO_DENY)
+
     def test_never_interactive_denies_unlisted(self):
         engine = PolicyEngine(approval_mode="neverInteractive")
         appr = ApprovalRequest.for_command("r", "curl https://example.com")

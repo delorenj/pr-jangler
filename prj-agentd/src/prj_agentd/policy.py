@@ -64,25 +64,49 @@ SKILL_RISK: dict[str, Decision] = {
 
 
 # Command patterns that are always safe to run, regardless of skill context.
+#
+# Two groups:
+#   1. Read-only inspection of repo / GitHub state.
+#   2. PR Jangler's own canonical commands — the LLM inside a turn often
+#      shells out to `python3 .../skills/prj-<name>/scripts/run.py` or invokes
+#      a `prj-<name>` binary on PATH; those ARE the phase skills doing their
+#      job and we trust them because they're local code we ship.
 SAFE_COMMAND_PATTERNS: tuple[re.Pattern, ...] = tuple(
     re.compile(p) for p in (
+        # Group 1: read-only inspection
         r"^gh\s+(pr|api|repo)\s+(view|list|diff|status)\b",
         r"^gh\s+api\s+rate_limit\b",
-        r"^git\s+(status|diff|log|rev-parse|branch|show)\b",
-        r"^python3?\s+.*--(dry-run|select-only)\b",
+        r"^git\s+(status|diff|log|rev-parse|branch|show|remote|config\s+--get)\b",
         r"^cat\s+.*state\.json$",
-        r"^ls\b",
+        r"^(ls|pwd|which|command\s+-v|type|file|head|tail|wc)\b",
+        # Group 2: PR Jangler's own machinery
+        # `python3 /abs/path/to/skills/prj-<name>/scripts/<script>.py ...`
+        r"\bpython3?\s+\S*/skills/prj-[a-z0-9-]+/scripts/[a-zA-Z0-9_]+\.py(\s|$)",
+        # Bare `prj-<name>` invocation (when the phase skill ships a binary)
+        r"^prj-[a-z0-9-]+(\s|$)",
+        # `--dry-run` / `--select-only` on any Python invocation
+        r"^python3?\s+.*--(dry-run|select-only)\b",
     )
 )
 
 # Command patterns that the daemon will always block — these are the
-# never-cross-the-line operations.
+# never-cross-the-line operations. These are evaluated BEFORE the safe list
+# so that a safe-looking prefix (e.g. a phase-skill invocation) cannot
+# smuggle in a forbidden suffix like `> state.json`.
 NEVER_ALLOW_PATTERNS: tuple[re.Pattern, ...] = tuple(
     re.compile(p) for p in (
-        r".*\bstate\.json.*>\s*",            # any > redirection into state.json
-        r"^echo\s+.+>\s*.*state\.json",
+        # Any shell redirection that writes INTO state.json — regardless of
+        # what's on the left side of `>`. Catches both `cmd > state.json`
+        # and `> state.json` patterns.
+        r">>?\s*\S*state\.json\b",
+        # Or the opposite direction (legacy form): state.json on the left,
+        # being targeted by a redirect that follows it on the line.
+        r"\bstate\.json\b\s*<",
+        # echo-pipe into state.json
+        r"\becho\s+.+\s*>\s*\S*state\.json\b",
         r"^rm\s+-rf?\s+.*/_bmad-output\b",   # daemon must not wipe state
         r"^git\s+push\s+--force",
+        r"^git\s+push\s+-f\b",
     )
 )
 
