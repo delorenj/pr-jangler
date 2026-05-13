@@ -41,6 +41,75 @@ from .timeline import Timeline
 ITEM_LIFECYCLE_METHODS = frozenset({"item/started", "item/updated", "item/completed"})
 
 
+# Server-initiated approval methods that codex actually sends, and the wire
+# vocabulary for the corresponding response's `decision` field. Discovered
+# from codex/codex-rs/app-server-protocol/schema/typescript/ServerRequest.ts
+# plus the corresponding Rust enum definitions.
+#
+# v1 methods use `ReviewDecision` (snake_case): approved | denied |
+#   approved_for_session | abort | timed_out
+# v2 methods use `CommandExecutionApprovalDecision` /
+#   `FileChangeApprovalDecision` (camelCase): accept | acceptForSession |
+#   decline | cancel
+#
+# We always default-decline UNKNOWN methods in the *legacy* shape because
+# the harness uses `{decision: approve|decline}`. Live codex never sends
+# anything other than the methods listed here.
+_APPROVAL_DIALECT_V1 = "v1"   # ExecCommandApproval / ApplyPatchApproval
+_APPROVAL_DIALECT_V2 = "v2"   # item/<thing>/requestApproval
+_APPROVAL_DIALECT_LEGACY = "legacy"  # our test harness's "approval/request"
+
+_APPROVAL_METHODS: dict[str, str] = {
+    "execCommandApproval": _APPROVAL_DIALECT_V1,
+    "applyPatchApproval": _APPROVAL_DIALECT_V1,
+    "item/commandExecution/requestApproval": _APPROVAL_DIALECT_V2,
+    "item/fileChange/requestApproval": _APPROVAL_DIALECT_V2,
+    "approval/request": _APPROVAL_DIALECT_LEGACY,
+}
+
+
+_SHELL_BASENAMES = frozenset({"sh", "bash", "zsh", "fish", "dash", "ksh"})
+_SHELL_DASH_C_FLAGS = frozenset({"-c", "-lc", "-ic", "-cl", "-ci"})
+
+
+def _shell_join_command(command: Any) -> str:
+    """Reduce codex's `command: Vec<String>` argv to a single command string.
+
+    Codex invokes user commands wrapped in a shell: argv looks like
+    `["/usr/bin/zsh", "-lc", "prj-discover --help"]`. The first two elements
+    are structural; only the rest is the meaningful command we should match
+    against the policy allowlist. Without this unwrapping, an anchored
+    pattern like `^prj-` never fires for the user's real intent.
+    """
+    if isinstance(command, str):
+        return command
+    if not isinstance(command, list) or not command:
+        return ""
+    if len(command) >= 3:
+        first = str(command[0])
+        # basename without extension, lower-cased
+        basename = first.rsplit("/", 1)[-1].lower()
+        if basename in _SHELL_BASENAMES and str(command[1]) in _SHELL_DASH_C_FLAGS:
+            return " ".join(str(c) for c in command[2:])
+    return " ".join(str(c) for c in command)
+
+
+def _decision_word(dialect: str, decision: Decision) -> str:
+    """Map our internal Decision to the wire word codex expects for `dialect`."""
+    if dialect == _APPROVAL_DIALECT_V1:
+        if decision is Decision.AUTO_APPROVE:
+            return "approved"
+        return "denied"
+    if dialect == _APPROVAL_DIALECT_V2:
+        if decision is Decision.AUTO_APPROVE:
+            return "accept"
+        return "decline"
+    # legacy / harness
+    if decision is Decision.AUTO_APPROVE:
+        return "approve"
+    return "decline"
+
+
 # Codex thread IDs are UUIDs (with or without `urn:uuid:` prefix). When we
 # cached a thread under offline mode the ID looks like `thr_xxxxxxxxxx` — that
 # value is meaningless to a live codex server and will be rejected with
@@ -131,54 +200,74 @@ class Daemon:
     # ----------------------- server-initiated handlers ---------------------
 
     async def _on_server_request(self, method: str, params: Any) -> dict[str, Any]:
-        """Handle a server-initiated JSON-RPC request.
+        """Handle a server-initiated JSON-RPC request from codex.
 
-        The app-server sends these when it needs the client to gate something:
-        approval/request for command execution, approval/request for file
-        changes, etc. We evaluate the policy and respond approve|decline.
+        Codex sends approval requests under several different method names
+        (v1: `execCommandApproval`, `applyPatchApproval`; v2: `item/.../
+        requestApproval`); each has its own decision-enum vocabulary on the
+        wire. We dispatch through `_APPROVAL_METHODS` to learn the dialect
+        and emit the right response shape, so codex actually understands
+        our approve / decline reply instead of silently treating it as the
+        default-Denied case (which produced the user's earlier
+        `Rejected("rejected by user")` log lines).
         """
-        if method != "approval/request":
-            return {"decision": "decline", "reason": f"unsupported server method {method!r}"}
-
         params = params or {}
-        kind = params.get("kind", "command")
-        command = params.get("command", "")
-        if kind == "command":
-            appr = ApprovalRequest.for_command(
-                run_id=params.get("turnId", ""),
-                command=command,
+        dialect = _APPROVAL_METHODS.get(method)
+
+        if dialect is None:
+            # Unknown method — return the codex-default deny in the legacy
+            # shape; codex v1/v2 servers will treat any unknown decision
+            # word as Denied via the enum default anyway.
+            self.timeline.event(
+                "appserver.unknown-request",
+                method=method,
+                params=params,
             )
-        else:
+            return {"decision": "denied", "reason": f"unsupported server method {method!r}"}
+
+        # Extract a command string from whichever shape codex used. v1 and v2
+        # both carry `command: Vec<String>` for command-exec; file-change
+        # requests don't have a command and we approve based on the kind.
+        cmd_raw = params.get("command", "")
+        command_str = _shell_join_command(cmd_raw)
+        is_file_change = method == "item/fileChange/requestApproval"
+
+        if is_file_change:
             appr = ApprovalRequest(
                 approval_id=f"appr_{uuid.uuid4().hex[:12]}",
-                kind=kind,
+                kind="file-change",
                 payload=dict(params),
                 run_id=params.get("turnId", ""),
             )
+        else:
+            appr = ApprovalRequest.for_command(
+                run_id=params.get("turnId", ""),
+                command=command_str,
+            )
+
         result = self.policy.evaluate(appr)
         self.timeline.event(
             "appserver.approval-requested",
             run_id=appr.run_id or None,
             approval_id=appr.approval_id,
-            kind=kind,
-            command=command if kind == "command" else None,
+            method=method,
+            dialect=dialect,
+            command=command_str if command_str else None,
+            argv=cmd_raw if isinstance(cmd_raw, list) else None,
             decision=result.decision.value,
             reason=result.reason,
         )
-        if result.decision is Decision.AUTO_APPROVE:
-            return {"decision": "approve", "reason": result.reason}
-        if result.decision is Decision.AUTO_DENY:
-            return {"decision": "decline", "reason": result.reason}
-        # REQUIRE_HUMAN within a live turn: record and decline for now. The
-        # daemon's loop-level approval path lets the human grant a session
-        # approval; the next turn can re-issue and clear.
-        self.store.record_approval_request(
-            approval_id=appr.approval_id,
-            run_id=appr.run_id or "",
-            kind=kind,
-            payload=dict(params),
-        )
-        return {"decision": "decline", "reason": "human approval required; logged for offline decision"}
+
+        if result.decision is Decision.REQUIRE_HUMAN:
+            self.store.record_approval_request(
+                approval_id=appr.approval_id,
+                run_id=appr.run_id or "",
+                kind=appr.kind,
+                payload=dict(params),
+            )
+
+        word = _decision_word(dialect, result.decision)
+        return {"decision": word, "reason": result.reason}
 
     async def _on_notification(self, method: str, params: Any) -> None:
         """Mirror app-server notifications into the timeline audit trail.

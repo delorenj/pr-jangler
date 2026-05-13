@@ -168,5 +168,119 @@ class TestDaemonTicks(unittest.IsolatedAsyncioTestCase):
         self.assertIn("tick.selection", events)
 
 
+class TestCodexApprovalDialects(unittest.IsolatedAsyncioTestCase):
+    """The daemon's _on_server_request handler must speak the right decision
+    enum vocabulary for each codex approval method. Sending `approve` to a v1
+    method makes codex treat it as Denied (default), which is what produced
+    the user's earlier `Rejected("rejected by user")` log lines."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _daemon(self):
+        return _make_daemon(self.root)
+
+    async def test_v1_exec_command_approval_auto_approve_returns_approved(self):
+        # safe phase-skill command -> AUTO_APPROVE -> wire word must be "approved"
+        d = self._daemon()
+        resp = await d._on_server_request(
+            "execCommandApproval",
+            {
+                "conversation_id": "thr_x",
+                "call_id": "c1",
+                "command": ["python3", "/some/path/skills/prj-discover/scripts/run.py"],
+                "cwd": "/tmp",
+            },
+        )
+        self.assertEqual(resp["decision"], "approved")
+
+    async def test_v1_exec_command_approval_auto_deny_returns_denied(self):
+        d = self._daemon()
+        resp = await d._on_server_request(
+            "execCommandApproval",
+            {"command": ["echo", "{}", ">", "state.json"], "cwd": "/tmp"},
+        )
+        self.assertEqual(resp["decision"], "denied")
+
+    async def test_v2_command_execution_approval_auto_approve_returns_accept(self):
+        # v2 dialect uses camelCase "accept"/"decline" enum
+        d = self._daemon()
+        resp = await d._on_server_request(
+            "item/commandExecution/requestApproval",
+            {
+                "threadId": "thr_x", "turnId": "turn_y", "itemId": "it_z",
+                "startedAtMs": 0,
+                "command": ["gh", "pr", "view", "42"],  # safe pattern
+                "cwd": "/tmp",
+            },
+        )
+        self.assertEqual(resp["decision"], "accept")
+
+    async def test_v2_command_execution_approval_unlisted_requires_human_returns_decline(self):
+        d = self._daemon()
+        resp = await d._on_server_request(
+            "item/commandExecution/requestApproval",
+            {"command": ["curl", "https://example.com"], "cwd": "/tmp"},
+        )
+        # Unlisted command under default unlessTrusted -> REQUIRE_HUMAN -> v2 word "decline"
+        self.assertEqual(resp["decision"], "decline")
+
+    async def test_v1_apply_patch_approval_uses_v1_dialect(self):
+        d = self._daemon()
+        resp = await d._on_server_request(
+            "applyPatchApproval",
+            {"command": ["fake"], "cwd": "/tmp"},  # any command; we'll get denied
+        )
+        # v1 dialect: must be "approved" or "denied", never "accept"/"decline"
+        self.assertIn(resp["decision"], ("approved", "denied"))
+
+    async def test_unknown_method_returns_denied_not_decline(self):
+        d = self._daemon()
+        resp = await d._on_server_request("totally/unknown/method", {})
+        # Default to the safest v1 word so codex's enum default works
+        self.assertEqual(resp["decision"], "denied")
+
+    async def test_argv_command_joined_to_string_for_policy_match(self):
+        """When codex sends argv ['python3', '.../skills/prj-discover/scripts/run.py'],
+        the policy must see that as a phase-skill invocation and auto-approve."""
+        d = self._daemon()
+        resp = await d._on_server_request(
+            "execCommandApproval",
+            {
+                "command": [
+                    "python3",
+                    "/home/u/code/pr-jangler/skills/prj-discover/scripts/run.py",
+                    "--project-root", "/home/u/repos/x",
+                ],
+                "cwd": "/tmp",
+            },
+        )
+        self.assertEqual(resp["decision"], "approved")
+
+    async def test_bare_prj_skill_argv_auto_approved(self):
+        d = self._daemon()
+        resp = await d._on_server_request(
+            "execCommandApproval",
+            {"command": ["prj-discover"], "cwd": "/tmp"},
+        )
+        self.assertEqual(resp["decision"], "approved")
+
+    async def test_zsh_wrapped_prj_skill_auto_approved(self):
+        """Codex actually invokes commands via /usr/bin/zsh -lc '<cmd>' — the
+        full argv is ['/usr/bin/zsh', '-lc', 'prj-discover']. The shell-joined
+        string includes 'prj-discover' as a substring, so the regex must
+        match against the meaningful tail, not require it at position 0."""
+        d = self._daemon()
+        resp = await d._on_server_request(
+            "execCommandApproval",
+            {"command": ["/usr/bin/zsh", "-lc", "prj-discover"], "cwd": "/tmp"},
+        )
+        self.assertEqual(resp["decision"], "approved")
+
+
 if __name__ == "__main__":
     unittest.main()
