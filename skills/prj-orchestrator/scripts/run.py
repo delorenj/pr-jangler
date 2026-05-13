@@ -16,15 +16,18 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from state_io import (
+    STATE_VERSION,
     append_runlog,
     find_project_root,
     init_state,
@@ -98,10 +101,95 @@ def _dispatch(skill: str, pr_number: int | None, mode: str | None, verbose: bool
         return ("dispatch-timeout", {"timeout_s": 300})
 
 
+def _state_sha(project_root: Path) -> str:
+    """SHA-256 of state.json bytes on disk, or 'no-state' if absent.
+
+    Used as an idempotency token by external daemons (e.g. prj-agentd) that
+    select an action and later need to detect whether the underlying state
+    changed before they execute it.
+    """
+    path = state_path(project_root)
+    if not path.exists():
+        return "no-state"
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _ephemeral_state(repo: str) -> dict[str, Any]:
+    """Build an in-memory empty state for --select-only when state.json is absent.
+
+    Mirrors init_state's structure but does NOT touch disk. Used so the selector
+    can return a useful action ('queue empty -> prj-discover') on a fresh
+    project without forcing a write.
+    """
+    return {
+        "version": STATE_VERSION,
+        "repo": repo,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "heartbeat_count": 0,
+        "last_report_sent": None,
+        "prs": {},
+    }
+
+
+def _select_only(project_root: Path, config: dict[str, Any], repo: str) -> dict[str, Any]:
+    """Pure selector: read-only, no runlog, no dispatch. Returns the action descriptor.
+
+    Output schema (one JSON object):
+        status: "action-selected" | "idle" | "misconfigured"
+        repo: "owner/name" or null
+        pr: int or null
+        phase: PR phase string or null (null for system actions and idle)
+        skill: target skill or null
+        mode: "pr" | "comment" | null
+        priority: int
+        reason: human-readable string
+        state_sha: "no-state" or 64-char hex
+    """
+    if state_path(project_root).exists():
+        state = load_state(project_root)
+    else:
+        state = _ephemeral_state(repo)
+
+    action = select_next_action(state, config)
+
+    pr_number = action.get("pr_number")
+    phase: str | None = None
+    if pr_number is not None:
+        pr_record = state["prs"].get(str(pr_number))
+        if pr_record is not None:
+            phase = pr_record.get("phase")
+
+    status = "idle" if action["action"] == "noop" else "action-selected"
+    return {
+        "status": status,
+        "repo": state.get("repo") or None,
+        "pr": pr_number,
+        "phase": phase,
+        "skill": action.get("skill"),
+        "mode": action.get("mode"),
+        "priority": action.get("priority", 0),
+        "reason": action.get("reason", ""),
+        "state_sha": _state_sha(project_root),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--project-root", help="Override project root", default=None)
     parser.add_argument("--dry-run", action="store_true", help="Compute and log but do not dispatch")
+    parser.add_argument(
+        "--select-only",
+        action="store_true",
+        help=(
+            "Pure selector mode for external daemons (e.g. prj-agentd): read-only, "
+            "no state mutation, no runlog, no dispatch. Emits one JSON object to "
+            "stdout with the selected action plus a state_sha idempotency token."
+        ),
+    )
     parser.add_argument("--verbose", action="store_true", help="Verbose stderr diagnostics")
     parser.add_argument("--once", action="store_true", help="Cron-clarity flag (always single-shot)")
     args = parser.parse_args()
@@ -116,6 +204,21 @@ def main() -> int:
     repo = config.get("prj_repo", "").strip() if isinstance(config.get("prj_repo"), str) else ""
     if not repo:
         msg = "prj_repo not configured in [modules.prj] of _bmad/config.toml. Refusing to run."
+        if args.select_only:
+            # Pure selector: no runlog side-effects. Still surface the misconfig as JSON
+            # so daemons can react without parsing stderr or relying on exit codes.
+            print(json.dumps({
+                "status": "misconfigured",
+                "repo": None,
+                "pr": None,
+                "phase": None,
+                "skill": None,
+                "mode": None,
+                "priority": 0,
+                "reason": msg,
+                "state_sha": _state_sha(project_root),
+            }, sort_keys=True))
+            return 2
         entry = {
             "run_id": run_id,
             "action": "abort",
@@ -126,6 +229,13 @@ def main() -> int:
         append_runlog(project_root, entry)
         print(json.dumps({"status": "abort", "reason": msg}), file=sys.stderr)
         return 2
+
+    if args.select_only:
+        result = _select_only(project_root, config, repo)
+        if args.verbose:
+            print(f"[run {run_id}] select-only result={json.dumps(result)}", file=sys.stderr)
+        print(json.dumps(result, sort_keys=True))
+        return 0
 
     # Ensure state exists
     if not state_path(project_root).exists():

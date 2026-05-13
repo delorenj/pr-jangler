@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prj-agentd"
+version = "0.1.0"
+description = "Mission Control daemon for PR Jangler: wraps the deterministic state machine with codex app-server agent runtime."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Jarad DeLorenzo" }]
+dependencies = []
+
+[project.scripts]
+prj-agentd = "prj_agentd.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

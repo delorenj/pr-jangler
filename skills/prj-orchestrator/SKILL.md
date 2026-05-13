@@ -30,11 +30,49 @@ python3 scripts/run.py
 That single script orchestrates everything: state initialization on first run, action selection, dispatch (with v1 stub fallback for not-yet-built phase skills), atomic state persistence, and run-log append. Flags:
 
 - `--dry-run` compute next action, log the intent, do not dispatch
+- `--select-only` pure selector mode (see below) for external daemons
 - `--verbose` emit diagnostics to stderr
 - `--once` no-op flag for cron clarity (always single-shot)
 - `--project-root <path>` override autodetect
 
 See `python3 scripts/run.py --help` for full detail.
+
+## `--select-only` (daemon seam)
+
+`--select-only` is the read-only selector mode. It computes the highest-priority next action and emits one JSON object on stdout — without mutating state, without appending a run-log entry, and without dispatching. It is the integration seam for an external control plane (e.g. an app-server-backed `prj-agentd`) that wants the deterministic selector to choose the action while the daemon owns execution, streaming, approvals, and thread persistence.
+
+Output schema:
+
+```json
+{
+  "status": "action-selected" | "idle" | "misconfigured",
+  "repo": "owner/name" | null,
+  "pr": 123 | null,
+  "phase": "ReviewPending" | null,
+  "skill": "prj-review" | null,
+  "mode": "pr" | "comment" | null,
+  "priority": 130,
+  "reason": "highest-priority PR action (PR 123, phase ReviewPending)",
+  "state_sha": "no-state" | "<sha256 hex of state.json>"
+}
+```
+
+Contract:
+
+- **No state mutation.** `state.json` is not initialized, the heartbeat counter is not incremented, no fields are written. A fresh project (no `state.json`) returns an `action-selected` for `prj-discover` against an ephemeral empty state.
+- **No run-log entry.** Pure selector calls are silent in the audit trail; they are not actions.
+- **No dispatch.** The caller is responsible for executing (or not executing) the returned action.
+- **`state_sha` is the idempotency token.** Daemons that select an action and later execute it should re-check `state_sha` to detect drift between selection and execution.
+- **Exit codes.** `0` on success (including `idle` and `action-selected`); `2` only for `misconfigured` (prj_repo missing). The misconfigured JSON is still emitted on stdout for machine consumption.
+
+Example:
+
+```bash
+python3 scripts/run.py --select-only
+# {"mode": null, "phase": null, "pr": null, "priority": 500, "reason": "queue empty",
+#  "repo": "owner/repo", "skill": "prj-discover", "state_sha": "no-state",
+#  "status": "action-selected"}
+```
 
 ## Architecture
 
