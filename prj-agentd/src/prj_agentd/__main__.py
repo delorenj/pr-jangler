@@ -26,6 +26,7 @@ from pathlib import Path
 
 from .config import load_config
 from .daemon import build_daemon
+from .dashboard import serve_dashboard
 from .store import AgentdStore
 
 
@@ -80,6 +81,15 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _cmd_dashboard(args: argparse.Namespace) -> int:
+    config = load_config(project_root=Path(args.project_root) if args.project_root else None)
+    try:
+        await serve_dashboard(config, host=args.host, port=int(args.port))
+        return 0
+    except KeyboardInterrupt:
+        return 0
+
+
 def _cmd_approve(args: argparse.Namespace) -> int:
     config = load_config(project_root=Path(args.project_root) if args.project_root else None)
     store = AgentdStore(config.store_path)
@@ -106,6 +116,11 @@ def main(argv: list[str] | None = None) -> int:
     p_status = sub.add_parser("status", help="Print pending approvals + summary")
     p_status.add_argument("--project-root", default=None)
 
+    p_dash = sub.add_parser("dashboard", help="Run the live web dashboard (WebSocket-powered)")
+    p_dash.add_argument("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1)")
+    p_dash.add_argument("--port", default="8765", help="Bind port (default: 8765)")
+    p_dash.add_argument("--project-root", default=None, help="Override project root")
+
     p_appr = sub.add_parser("approve", help="Record a human decision for a pending approval")
     p_appr.add_argument("approval_id")
     p_appr.add_argument("--decision", choices=("approve", "deny"), default="approve")
@@ -120,6 +135,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_cmd_run(args))
     if args.cmd == "status":
         return _cmd_status(args)
+    if args.cmd == "dashboard":
+        return asyncio.run(_cmd_dashboard(args))
     if args.cmd == "approve":
         return _cmd_approve(args)
     parser.error(f"unknown cmd: {args.cmd}")

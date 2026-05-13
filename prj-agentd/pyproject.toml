@@ -17,3 +17,6 @@ prj-agentd = "prj_agentd.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+prj_agentd = ["dashboard_assets/*.html", "dashboard_assets/*.css", "dashboard_assets/*.js"]

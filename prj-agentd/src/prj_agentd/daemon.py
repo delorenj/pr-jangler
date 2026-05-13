@@ -181,9 +181,22 @@ class Daemon:
         return {"decision": "decline", "reason": "human approval required; logged for offline decision"}
 
     async def _on_notification(self, method: str, params: Any) -> None:
-        """Mirror app-server notifications into the timeline audit trail."""
+        """Mirror app-server notifications into the timeline audit trail.
+
+        We translate each codex notification method into its own timeline
+        event_type so the dashboard can color-code, filter, and surface
+        relevant payload fields per category. The naming convention is:
+
+            item/<lifecycle>          -> item.<lifecycle>
+            <namespace>/<rest>        -> codex.<namespace>/<rest>
+            <single-token>            -> codex.<single-token>
+
+        That keeps the high-signal item lifecycle events at the top level
+        (they were already curated this way) and tucks everything else
+        under a `codex.` prefix the UI can filter en masse.
+        """
+        params = params or {}
         if method in ITEM_LIFECYCLE_METHODS:
-            params = params or {}
             self.timeline.event(
                 f"item.{method.split('/', 1)[1]}",
                 run_id=params.get("turnId"),
@@ -192,11 +205,22 @@ class Daemon:
                 data=params.get("data"),
             )
             return
-        # Catch-all: still mirror so the timeline never drops an event.
+        # All other codex notifications: keep the actual method name so the
+        # UI can tell `thread/started` apart from `turn/diff/updated`. Pull
+        # a few interesting fields up to the top level for dashboard meta.
+        meta: dict[str, Any] = {"method": method}
+        if isinstance(params, dict):
+            # Common shape: params often carry threadId / turnId
+            for key in ("threadId", "turnId", "status", "title", "name"):
+                if key in params and params[key] is not None:
+                    meta[key] = params[key]
+            # Plan updates and reasoning summaries surface text-like fields
+            for key in ("text", "summary"):
+                if key in params and isinstance(params[key], str):
+                    meta[key] = params[key][:160]
         self.timeline.event(
-            f"appserver.notification",
-            method=method,
-            params=params,
+            f"codex.{method}",
+            **meta,
         )
 
     # ------------------------------------------------------------------ ticks

@@ -1,0 +1,941 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prj-agentd · mission control</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #07070a;
+  --bg-grad-top: #14141c;
+  --surface: #11111a;
+  --surface-2: #15161f;
+  --elev: #1a1b26;
+  --border: #20212d;
+  --border-bright: #2a2b3a;
+  --text: #e8e9ef;
+  --text-muted: #7a7b8a;
+  --text-dim: #4d4e5c;
+  --accent: #b5f23d;
+  --accent-2: #9be024;
+  --accent-glow: rgba(181, 242, 61, 0.18);
+  --accent-glow-strong: rgba(181, 242, 61, 0.4);
+  --success: #34d399;
+  --warning: #fbbf24;
+  --danger: #fb7185;
+  --info: #67e8f9;
+  --purple: #c4b5fd;
+  --orange: #fdba74;
+  --mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.5;
+  height: 100%;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: 'cv11', 'ss01', 'ss02';
+}
+body {
+  background:
+    radial-gradient(ellipse 1200px 600px at 50% -100px, var(--bg-grad-top) 0%, transparent 70%),
+    radial-gradient(ellipse 800px 400px at 10% 100%, rgba(181, 242, 61, 0.04) 0%, transparent 70%),
+    var(--bg);
+}
+.app {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  height: 100vh;
+  padding: 20px 28px;
+  gap: 18px;
+  max-width: 1800px;
+  margin: 0 auto;
+}
+
+/* ============ Header ============ */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 14px; }
+.brand-mark {
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  position: relative;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 0 32px var(--accent-glow);
+}
+.brand-mark::after {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  background: var(--bg);
+  border-radius: 2px;
+  background-image: linear-gradient(135deg, var(--bg) 50%, rgba(255,255,255,0.06) 100%);
+}
+.brand-mark::before {
+  content: '';
+  position: absolute;
+  inset: 11px 11px auto auto;
+  width: 4px; height: 4px;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--accent);
+  animation: blink 1.4s infinite;
+}
+@keyframes blink {
+  0%, 60%, 100% { opacity: 1; }
+  80% { opacity: 0.3; }
+}
+.brand h1 {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.brand h1 .accent { color: var(--accent); }
+.brand h1 .dim { color: var(--text-muted); font-weight: 500; }
+.brand .sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  letter-spacing: -0.005em;
+}
+
+.header-right { display: flex; align-items: center; gap: 20px; }
+.conn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.conn-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  position: relative;
+  transition: background 0.2s;
+}
+.conn-dot.live {
+  background: var(--accent);
+  box-shadow: 0 0 12px var(--accent-glow-strong);
+  animation: pulse 2.2s infinite;
+}
+.conn-dot.live::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid var(--accent);
+  opacity: 0;
+  animation: ring 2.2s infinite;
+}
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@keyframes ring {
+  0% { opacity: 0.6; transform: scale(0.8); }
+  100% { opacity: 0; transform: scale(2); }
+}
+
+/* ============ Stats ============ */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+.stat {
+  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.stat:hover {
+  border-color: var(--border-bright);
+}
+.stat::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 200px 80px at 50% 100%, rgba(255,255,255,0.025) 0%, transparent 70%);
+  pointer-events: none;
+}
+.stat-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.stat-label .marker {
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow-strong);
+}
+.stat-value {
+  font-family: var(--mono);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  line-height: 1;
+}
+.stat-value.muted { color: var(--text-muted); }
+.stat-value.accent { color: var(--accent); text-shadow: 0 0 16px var(--accent-glow); }
+.stat-value.warn { color: var(--warning); }
+.stat-sub {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-top: 6px;
+  letter-spacing: -0.005em;
+}
+
+/* ============ Main grid ============ */
+main {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 16px;
+  min-height: 0;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);
+}
+.panel-header h2 {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.panel-header h2 .accent { color: var(--accent); }
+.panel-header .meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  letter-spacing: 0.05em;
+}
+.panel-body {
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-bright) transparent;
+}
+.panel-body::-webkit-scrollbar { width: 8px; }
+.panel-body::-webkit-scrollbar-track { background: transparent; }
+.panel-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.panel-body::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+
+/* ============ Filter chips ============ */
+.filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.filters::-webkit-scrollbar { display: none; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  white-space: nowrap;
+  user-select: none;
+}
+.chip:hover { border-color: var(--text-muted); color: var(--text); }
+.chip.on {
+  background: rgba(181, 242, 61, 0.08);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.chip .count {
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 1px 5px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+.chip.on .count {
+  background: rgba(181, 242, 61, 0.15);
+  color: var(--accent);
+}
+.chip.danger.on { border-color: var(--danger); color: var(--danger); background: rgba(251, 113, 133, 0.06); }
+.chip.warn.on { border-color: var(--warning); color: var(--warning); background: rgba(251, 191, 36, 0.06); }
+.chip.info.on { border-color: var(--info); color: var(--info); background: rgba(103, 232, 249, 0.06); }
+.chip.purple.on { border-color: var(--purple); color: var(--purple); background: rgba(196, 181, 253, 0.06); }
+.chip.dim.on { border-color: var(--text-muted); color: var(--text-muted); background: rgba(122, 123, 138, 0.06); }
+
+/* ============ Event stream ============ */
+.event-list { display: flex; flex-direction: column; }
+.event {
+  display: grid;
+  grid-template-columns: 100px 220px 1fr;
+  gap: 14px;
+  padding: 9px 18px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  border-bottom: 1px solid rgba(32, 33, 45, 0.5);
+  animation: slide-in 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+  position: relative;
+}
+.event:hover { background: rgba(255, 255, 255, 0.015); }
+.event::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: transparent;
+  transition: background 0.2s;
+}
+.event.replay::before { background: var(--text-dim); }
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.event-time {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.event-type {
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.event-type.success { color: var(--success); }
+.event-type.warn { color: var(--warning); }
+.event-type.danger { color: var(--danger); }
+.event-type.info { color: var(--info); }
+.event-type.purple { color: var(--purple); }
+.event-type.accent { color: var(--accent); }
+.event-type.orange { color: var(--orange); }
+.event-type.dim { color: var(--text-muted); }
+.event-meta {
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+}
+.tag {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  padding: 1px 6px;
+  margin-right: 5px;
+  font-size: 10.5px;
+  color: var(--text);
+  font-weight: 500;
+}
+.tag.accent { color: var(--accent); border-color: rgba(181, 242, 61, 0.2); background: rgba(181, 242, 61, 0.06); }
+.tag.warn { color: var(--warning); border-color: rgba(251, 191, 36, 0.2); background: rgba(251, 191, 36, 0.06); }
+.tag.danger { color: var(--danger); border-color: rgba(251, 113, 133, 0.2); background: rgba(251, 113, 133, 0.06); }
+.tag.success { color: var(--success); border-color: rgba(52, 211, 153, 0.2); background: rgba(52, 211, 153, 0.06); }
+.tag.dim { color: var(--text-muted); }
+
+/* ============ Approvals ============ */
+.approvals { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.approval-card {
+  background: var(--elev);
+  border: 1px solid var(--border-bright);
+  border-left: 3px solid var(--warning);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  position: relative;
+  animation: slide-in 0.4s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.approval-card::after {
+  content: '';
+  position: absolute;
+  top: -1px; right: -1px;
+  width: 0; height: 0;
+  border-style: solid;
+  border-width: 0 8px 8px 0;
+  border-color: transparent var(--warning) transparent transparent;
+  opacity: 0.7;
+}
+.approval-skill {
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.approval-skill .pr {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.approval-meta {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  margin: 6px 0 12px;
+  line-height: 1.55;
+}
+.approval-meta .label { color: var(--text-dim); }
+.approval-actions { display: flex; gap: 6px; }
+button {
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 7px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  letter-spacing: 0.02em;
+}
+button:hover { border-color: var(--text-muted); }
+button.approve {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+  font-weight: 700;
+}
+button.approve:hover {
+  box-shadow: 0 0 24px var(--accent-glow-strong);
+  transform: translateY(-1px);
+}
+button.deny:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ============ Empty states ============ */
+.empty {
+  padding: 36px 24px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.03em;
+}
+.empty .marker {
+  font-size: 22px;
+  margin-bottom: 8px;
+  opacity: 0.5;
+}
+
+/* ============ Recent runs ============ */
+.runs-block {
+  border-top: 1px solid var(--border);
+  padding: 12px;
+}
+.runs-block .label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  padding: 0 4px 8px;
+}
+.run-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.run-row:hover { background: rgba(255, 255, 255, 0.02); }
+.run-row .left {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-row .skill { color: var(--text); }
+.run-row .pr { color: var(--text-muted); margin-left: 6px; }
+.run-row .status {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-dim);
+}
+.run-row .status.ok { color: var(--success); }
+.run-row .status.fail { color: var(--danger); }
+.run-row .status.pending { color: var(--warning); }
+
+/* ============ Tiny ============ */
+@media (max-width: 1100px) {
+  main { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .event { grid-template-columns: 80px 160px 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div>
+        <h1>prj<span class="accent">-</span>agentd<span class="dim"> // </span>mission_control</h1>
+        <div class="sub" id="brand-sub">connecting…</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="conn">
+        <span class="conn-dot" id="conn-dot"></span>
+        <span id="conn-text">disconnected</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-label"><span class="marker"></span>Active threads</div>
+      <div class="stat-value" id="stat-threads">—</div>
+      <div class="stat-sub" id="stat-threads-sub">repo · per-PR</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label"><span class="marker"></span>Pending approvals</div>
+      <div class="stat-value" id="stat-approvals">—</div>
+      <div class="stat-sub">awaiting human decision</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label"><span class="marker"></span>Last tick</div>
+      <div class="stat-value muted" id="stat-tick">—</div>
+      <div class="stat-sub" id="stat-tick-sub">heartbeat</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label"><span class="marker"></span>Runs today</div>
+      <div class="stat-value accent" id="stat-runs">—</div>
+      <div class="stat-sub" id="stat-runs-sub">since UTC midnight</div>
+    </div>
+  </div>
+
+  <main>
+    <div class="panel">
+      <div class="panel-header">
+        <h2>event stream <span class="accent">·</span> live</h2>
+        <span class="meta"><span id="event-count">0</span> events · <span id="event-visible">0</span> shown</span>
+      </div>
+      <div class="filters" id="filters">
+        <button class="chip on accent" data-cat="ticks">ticks <span class="count" data-count="ticks">0</span></button>
+        <button class="chip on info" data-cat="threads">threads <span class="count" data-count="threads">0</span></button>
+        <button class="chip on info" data-cat="context">context <span class="count" data-count="context">0</span></button>
+        <button class="chip on purple" data-cat="items">items <span class="count" data-count="items">0</span></button>
+        <button class="chip on warn" data-cat="approvals">approvals <span class="count" data-count="approvals">0</span></button>
+        <button class="chip on info" data-cat="handshake">handshake <span class="count" data-count="handshake">0</span></button>
+        <button class="chip dim" data-cat="codex">codex notifications <span class="count" data-count="codex">0</span></button>
+        <button class="chip danger on" data-cat="errors">errors <span class="count" data-count="errors">0</span></button>
+      </div>
+      <div class="panel-body" id="events">
+        <div class="empty"><div class="marker">◇</div>waiting for events…</div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-header">
+        <h2>pending approvals</h2>
+        <span class="meta" id="approvals-count">0</span>
+      </div>
+      <div class="panel-body">
+        <div id="approvals-list">
+          <div class="empty"><div class="marker">◌</div>no pending approvals</div>
+        </div>
+        <div class="runs-block">
+          <div class="label">recent runs</div>
+          <div id="runs-list"></div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<script>
+'use strict';
+
+const $ = id => document.getElementById(id);
+const eventsEl = $('events');
+const approvalsListEl = $('approvals-list');
+const approvalsCountEl = $('approvals-count');
+const runsListEl = $('runs-list');
+const connDot = $('conn-dot');
+const connText = $('conn-text');
+const brandSub = $('brand-sub');
+
+const statThreads = $('stat-threads');
+const statThreadsSub = $('stat-threads-sub');
+const statApprovals = $('stat-approvals');
+const statTick = $('stat-tick');
+const statTickSub = $('stat-tick-sub');
+const statRuns = $('stat-runs');
+const statRunsSub = $('stat-runs-sub');
+const eventCountEl = $('event-count');
+
+let eventCount = 0;
+let lastTickAt = null;
+
+// event_type → CSS class + meta hint
+const TYPE_STYLE = {
+  'appserver.handshake':           { cls: 'info' },
+  'appserver.goal-set-failed':     { cls: 'dim' },
+  'appserver.skills-list-failed':  { cls: 'dim' },
+  'appserver.approval-requested':  { cls: 'warn' },
+  'tick.started':                  { cls: 'dim' },
+  'tick.selection':                { cls: 'accent' },
+  'tick.policy-decision':          { cls: 'purple' },
+  'tick.turn-completed':           { cls: 'success' },
+  'tick.approval-requested':       { cls: 'warn' },
+  'tick.approval-drifted':         { cls: 'orange' },
+  'tick.session-approval-found':   { cls: 'success' },
+  'tick.thread-cache-invalidated': { cls: 'orange' },
+  'tick.skill-not-allowlisted':    { cls: 'warn' },
+  'tick.selector-failed':          { cls: 'danger' },
+  'tick.crashed':                  { cls: 'danger' },
+  'repo-thread.created':           { cls: 'accent' },
+  'pr-thread.created':             { cls: 'accent' },
+  'context.injected':              { cls: 'info' },
+  'item.started':                  { cls: 'purple' },
+  'item.updated':                  { cls: 'purple' },
+  'item.completed':                { cls: 'purple' },
+};
+
+// Categorize an event_type into one of the filter buckets above.
+function categoryOf(t) {
+  if (!t) return 'codex';
+  if (t === 'tick.crashed' || t === 'tick.selector-failed') return 'errors';
+  if (t.startsWith('tick.')) {
+    if (t.includes('approval') || t.includes('drifted') || t.includes('invalidated')) return 'approvals';
+    return 'ticks';
+  }
+  if (t.endsWith('thread.created') || t.startsWith('repo-thread') || t.startsWith('pr-thread')) return 'threads';
+  if (t === 'context.injected') return 'context';
+  if (t.startsWith('item.')) return 'items';
+  if (t.startsWith('appserver.handshake')) return 'handshake';
+  if (t.startsWith('appserver.approval')) return 'approvals';
+  if (t.startsWith('appserver.')) return 'handshake';
+  if (t.startsWith('codex.')) return 'codex';
+  return 'codex';
+}
+
+// Which categories are currently visible (default: hide raw codex notifications)
+const VISIBLE = {
+  ticks: true, threads: true, context: true, items: true,
+  approvals: true, handshake: true, codex: false, errors: true,
+};
+const CATEGORY_COUNTS = { ticks:0, threads:0, context:0, items:0, approvals:0, handshake:0, codex:0, errors:0 };
+
+function fmtTime(ts) {
+  if (!ts) return '——————';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return ts.slice(11, 23) || '———';
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${hh}:${mm}:${ss}.${ms}`;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]);
+}
+
+function tag(text, cls = '') {
+  return `<span class="tag${cls ? ' ' + cls : ''}">${esc(text)}</span>`;
+}
+
+function buildEventMeta(ev) {
+  const p = ev.payload || {};
+  const parts = [];
+  // For codex.* events: surface the method/status/title/text we pulled up
+  if (ev.event_type && ev.event_type.startsWith('codex.')) {
+    if (p.status) parts.push(tag(p.status));
+    if (p.title) parts.push(esc(String(p.title).slice(0, 60)));
+    if (p.name) parts.push(esc(String(p.name).slice(0, 60)));
+    if (p.text) parts.push(esc(String(p.text).slice(0, 90)));
+    if (p.summary) parts.push(esc(String(p.summary).slice(0, 90)));
+    if (p.turnId) parts.push(tag(String(p.turnId).slice(0, 12) + '…', 'dim'));
+    return parts.join(' ');
+  }
+  if (p.skill) parts.push(tag(p.skill, 'accent'));
+  if (p.pr) parts.push(`PR ${p.pr}`);
+  if (p.decision) {
+    const dcls = p.decision === 'auto_approve' ? 'success'
+              : p.decision === 'auto_deny' ? 'danger'
+              : p.decision === 'require_human' ? 'warn' : '';
+    parts.push(tag(p.decision, dcls));
+  }
+  if (p.turn_status && ev.event_type === 'tick.turn-completed') {
+    const tcls = p.turn_status.startsWith('completed') ? 'success'
+              : p.turn_status === 'failed' ? 'danger' : 'warn';
+    parts.push(tag(p.turn_status, tcls));
+  }
+  if (p.item_type) parts.push(tag(p.item_type, 'dim'));
+  if (p.reason) parts.push(esc(String(p.reason).slice(0, 90)));
+  if (p.error && !p.reason) {
+    const msg = typeof p.error === 'string' ? p.error : (p.error.message || JSON.stringify(p.error));
+    parts.push(tag(String(msg).slice(0, 80), 'danger'));
+  }
+  if (p.thread_id && parts.length === 0) parts.push(esc(p.thread_id.slice(0, 13) + '…'));
+  return parts.join(' ');
+}
+
+function addEvent(ev) {
+  if (eventCount === 0) eventsEl.innerHTML = '<div class="event-list"></div>';
+  const list = eventsEl.firstElementChild;
+  eventCount++;
+  eventCountEl.textContent = eventCount.toLocaleString();
+
+  const cat = categoryOf(ev.event_type);
+  CATEGORY_COUNTS[cat] = (CATEGORY_COUNTS[cat] || 0) + 1;
+  const countEl = document.querySelector(`[data-count="${cat}"]`);
+  if (countEl) countEl.textContent = CATEGORY_COUNTS[cat].toLocaleString();
+
+  if (ev.event_type === 'tick.started') {
+    lastTickAt = ev.ts;
+    updateTickAgo();
+  }
+
+  const style = TYPE_STYLE[ev.event_type] || {};
+  // Default style for raw codex notifications is dim, so they don't shout
+  const cls = style.cls || (cat === 'codex' ? 'dim' : '');
+  const row = document.createElement('div');
+  row.className = 'event' + (ev._replay ? ' replay' : '');
+  row.dataset.cat = cat;
+  if (!VISIBLE[cat]) row.style.display = 'none';
+  row.innerHTML = `
+    <span class="event-time">${fmtTime(ev.ts)}</span>
+    <span class="event-type ${cls}">${esc(ev.event_type)}</span>
+    <span class="event-meta">${buildEventMeta(ev)}</span>
+  `;
+  list.insertBefore(row, list.firstChild);
+
+  // Keep the DOM bounded
+  while (list.children.length > 800) list.removeChild(list.lastChild);
+
+  updateVisibleCount();
+}
+
+function updateVisibleCount() {
+  const visEl = document.getElementById('event-visible');
+  if (!visEl) return;
+  let n = 0;
+  for (const cat in VISIBLE) if (VISIBLE[cat]) n += (CATEGORY_COUNTS[cat] || 0);
+  visEl.textContent = n.toLocaleString();
+}
+
+// Filter chip clicks
+document.getElementById('filters').addEventListener('click', e => {
+  const chip = e.target.closest('.chip[data-cat]');
+  if (!chip) return;
+  const cat = chip.dataset.cat;
+  VISIBLE[cat] = !VISIBLE[cat];
+  chip.classList.toggle('on', VISIBLE[cat]);
+  // Toggle visibility of existing rows
+  document.querySelectorAll(`.event[data-cat="${cat}"]`).forEach(row => {
+    row.style.display = VISIBLE[cat] ? '' : 'none';
+  });
+  updateVisibleCount();
+});
+
+function updateTickAgo() {
+  if (!lastTickAt) return;
+  const ms = Date.now() - new Date(lastTickAt).getTime();
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) { statTick.textContent = s + 's'; statTickSub.textContent = 'seconds ago'; }
+  else if (s < 3600) { statTick.textContent = Math.round(s / 60) + 'm'; statTickSub.textContent = 'minutes ago'; }
+  else { statTick.textContent = Math.round(s / 3600) + 'h'; statTickSub.textContent = 'hours ago'; }
+  statTick.classList.toggle('muted', s > 120);
+  statTick.classList.toggle('accent', s <= 60);
+}
+setInterval(updateTickAgo, 1000);
+
+// ============ Status polling ============
+
+async function refreshStatus() {
+  let data;
+  try {
+    const r = await fetch('/api/status', { cache: 'no-store' });
+    if (!r.ok) return;
+    data = await r.json();
+  } catch { return; }
+
+  brandSub.textContent = (data.repo || data.project_root || '').toLowerCase()
+    + (data.approval_mode ? ` · policy=${data.approval_mode}` : '');
+
+  // Stats
+  const tt = (data.repo_thread_count || 0) + (data.pr_thread_count || 0);
+  statThreads.textContent = tt.toString();
+  statThreads.classList.toggle('accent', tt > 0);
+  statThreads.classList.toggle('muted', tt === 0);
+  statThreadsSub.textContent = `${data.repo_thread_count || 0} repo · ${data.pr_thread_count || 0} PR`;
+
+  const ac = data.approval_count || 0;
+  statApprovals.textContent = ac.toString();
+  statApprovals.classList.toggle('warn', ac > 0);
+  statApprovals.classList.toggle('muted', ac === 0);
+
+  statRuns.textContent = (data.runs_today || 0).toString();
+
+  approvalsCountEl.textContent = ac.toString();
+  renderApprovals(data.pending_approvals || []);
+  renderRuns(data.recent_runs || []);
+}
+
+function renderApprovals(pending) {
+  if (!pending.length) {
+    approvalsListEl.innerHTML = '<div class="empty"><div class="marker">◌</div>no pending approvals</div>';
+    return;
+  }
+  approvalsListEl.innerHTML = '<div class="approvals">' + pending.map(a => {
+    const skill = (a.payload && a.payload.skill) || 'unknown';
+    const pr = a.payload && a.payload.pr;
+    const sha = (a.payload && a.payload.state_sha) || '';
+    const shaPretty = sha === 'no-state' ? sha : (sha ? sha.slice(0, 12) + '…' : '');
+    return `
+      <div class="approval-card" data-id="${esc(a.approval_id)}">
+        <div class="approval-skill">${esc(skill)}${pr ? ` <span class="pr">· PR #${pr}</span>` : ''}</div>
+        <div class="approval-meta">
+          <span class="label">id</span> ${esc(a.approval_id)}<br>
+          ${shaPretty ? `<span class="label">sha</span> ${esc(shaPretty)}<br>` : ''}
+          <span class="label">requested</span> ${fmtTime(a.requested_at)}
+        </div>
+        <div class="approval-actions">
+          <button class="approve" data-id="${esc(a.approval_id)}" data-decision="approve">approve</button>
+          <button class="deny" data-id="${esc(a.approval_id)}" data-decision="deny">deny</button>
+        </div>
+      </div>`;
+  }).join('') + '</div>';
+}
+
+approvalsListEl.addEventListener('click', e => {
+  const btn = e.target.closest('button[data-id]');
+  if (!btn) return;
+  decide(btn.dataset.id, btn.dataset.decision);
+});
+
+async function decide(approval_id, decision) {
+  try {
+    await fetch('/api/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approval_id, decision, reason: 'via dashboard' }),
+    });
+  } catch {}
+  refreshStatus();
+}
+
+function renderRuns(runs) {
+  if (!runs.length) {
+    runsListEl.innerHTML = '<div class="empty" style="padding: 8px;">no runs yet</div>';
+    return;
+  }
+  runsListEl.innerHTML = runs.slice(0, 8).map(r => {
+    const status = r.status || 'pending';
+    const cls = status.startsWith('completed') ? 'ok'
+             : status === 'failed' ? 'fail'
+             : status === 'started' ? 'pending' : '';
+    return `
+      <div class="run-row">
+        <div class="left">
+          <span class="skill">${esc(r.skill)}</span>${r.pr_number ? `<span class="pr">PR #${r.pr_number}</span>` : ''}
+        </div>
+        <div class="status ${cls}">${esc(status)}</div>
+      </div>`;
+  }).join('');
+}
+
+// ============ WebSocket ============
+
+let ws = null;
+let reconnectDelay = 600;
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => {
+    connDot.classList.add('live');
+    connText.textContent = 'live';
+    reconnectDelay = 600;
+  };
+  ws.onmessage = e => {
+    try { addEvent(JSON.parse(e.data)); } catch {}
+  };
+  ws.onclose = () => {
+    connDot.classList.remove('live');
+    connText.textContent = 'reconnecting…';
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 1.5, 5000);
+  };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+connect();
+refreshStatus();
+setInterval(refreshStatus, 4000);
+</script>
+</body>
+</html>

@@ -331,6 +331,59 @@ class AgentdStore:
                 (decision, reason, _now(), decided_by, approval_id),
             )
 
+    def count_repo_threads(self) -> int:
+        with self._lock:
+            conn = self._connect()
+            try:
+                (n,) = conn.execute("SELECT COUNT(*) FROM repo_threads").fetchone()
+            finally:
+                conn.close()
+        return int(n)
+
+    def count_pr_threads(self) -> int:
+        with self._lock:
+            conn = self._connect()
+            try:
+                (n,) = conn.execute("SELECT COUNT(*) FROM pr_threads").fetchone()
+            finally:
+                conn.close()
+        return int(n)
+
+    def count_runs_since(self, iso_ts: str) -> int:
+        with self._lock:
+            conn = self._connect()
+            try:
+                (n,) = conn.execute(
+                    "SELECT COUNT(*) FROM runs WHERE started_at >= ?", (iso_ts,)
+                ).fetchone()
+            finally:
+                conn.close()
+        return int(n)
+
+    def recent_runs(self, limit: int = 20) -> list[dict]:
+        with self._lock:
+            conn = self._connect()
+            try:
+                rows = conn.execute(
+                    """SELECT run_id, repo, pr_number, skill, status, started_at, completed_at
+                       FROM runs ORDER BY started_at DESC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            finally:
+                conn.close()
+        return [
+            {
+                "run_id": r["run_id"],
+                "repo": r["repo"],
+                "pr_number": r["pr_number"],
+                "skill": r["skill"],
+                "status": r["status"],
+                "started_at": r["started_at"],
+                "completed_at": r["completed_at"],
+            }
+            for r in rows
+        ]
+
     def pending_approvals(self) -> list[dict]:
         with self._lock:
             conn = self._connect()
