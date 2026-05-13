@@ -203,7 +203,10 @@ class HarnessAppServer:
         if method == "skills/list":
             return {"skills": [{"name": s} for s in self._discover_skills()]}
         if method == "thread/start":
-            tid = f"thr_{uuid.uuid4().hex[:10]}"
+            # Mint a real UUID so the daemon's cached-thread-id validation
+            # (which expects codex-shaped UUIDs in live mode) accepts the
+            # harness as a faithful codex stand-in.
+            tid = str(uuid.uuid4())
             return {"threadId": tid}
         if method == "thread/goal/set":
             return {"ok": True}

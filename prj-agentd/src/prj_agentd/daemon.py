@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -29,6 +30,7 @@ from typing import Any
 from .appserver import AppServerInterface, OfflineAppServer, ThreadHandle
 from .config import AgentdConfig
 from .policy import ApprovalRequest, Decision, PolicyEngine
+from .rpc import JsonRpcError
 from .selector import Selection, run_selector
 from .store import AgentdStore
 from .timeline import Timeline
@@ -37,6 +39,39 @@ from .timeline import Timeline
 # Notification methods that carry per-turn item lifecycle. The daemon mirrors
 # each one into the timeline as `item.<lifecycle>` for the audit trail.
 ITEM_LIFECYCLE_METHODS = frozenset({"item/started", "item/updated", "item/completed"})
+
+
+# Codex thread IDs are UUIDs (with or without `urn:uuid:` prefix). When we
+# cached a thread under offline mode the ID looks like `thr_xxxxxxxxxx` — that
+# value is meaningless to a live codex server and will be rejected with
+# `invalid thread id`. Use this regex to detect cached values that are NOT
+# valid for live-mode dispatch and preemptively drop them.
+_LIVE_THREAD_ID_PATTERN = re.compile(
+    r"^(?:urn:uuid:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+
+def _is_live_thread_id(thread_id: str) -> bool:
+    """True iff `thread_id` looks like a codex UUID."""
+    return bool(_LIVE_THREAD_ID_PATTERN.match(thread_id))
+
+
+# Substrings that indicate codex rejected our thread id (or it has been
+# purged). When we see one of these, the right move is to forget the cached
+# thread and let the next operation start fresh.
+_STALE_THREAD_ERROR_FRAGMENTS = (
+    "invalid thread id",
+    "thread not found",
+    "unknown thread",
+)
+
+
+def _is_stale_thread_error(exc: BaseException) -> bool:
+    if not isinstance(exc, JsonRpcError):
+        return False
+    msg = str(exc).lower()
+    return any(frag in msg for frag in _STALE_THREAD_ERROR_FRAGMENTS)
 
 
 @dataclass
@@ -306,31 +341,57 @@ class Daemon:
                     thread_id=None, pr_thread_id=None, status="human-approval-pending",
                 )
 
-        # AUTO_APPROVE -> execute through app-server (real or offline)
-        repo_thread = await self._ensure_repo_thread(selection.repo or self.config.prj_repo)
-        pr_thread = None
-        if selection.pr is not None:
-            pr_thread = await self._ensure_pr_thread(
-                selection.repo or self.config.prj_repo,
-                selection.pr,
-                latest_phase=selection.phase,
-                latest_state_sha=selection.state_sha,
-                parent_thread_id=repo_thread.thread_id,
-            )
-        active_thread = pr_thread or repo_thread
-
+        # AUTO_APPROVE -> execute through app-server (real or offline).
+        # The full "ensure threads + inject context + run turn" sequence is
+        # retried once if codex rejects the cached thread id mid-flight
+        # (stale entry after offline→live mode switch, codex thread purged,
+        # etc.). The retry forgets caches and starts fresh threads.
+        repo = selection.repo or self.config.prj_repo
         self.store.record_run_started(
             run_id=run_id,
-            repo=selection.repo or self.config.prj_repo,
+            repo=repo,
             pr_number=selection.pr,
             skill=selection.skill,
             selection=selection.to_dict(),
         )
 
-        await self._inject_runtime_context(active_thread.thread_id, selection, run_id)
-
         skill_path = self.config.project_root / "skills" / selection.skill / "SKILL.md"
         user_text = self._compose_user_text(selection)
+
+        async def _ensure_and_inject() -> tuple[ThreadHandle, ThreadHandle | None]:
+            repo_thread = await self._ensure_repo_thread(repo)
+            pr_thread = None
+            if selection.pr is not None:
+                pr_thread = await self._ensure_pr_thread(
+                    repo, selection.pr,
+                    latest_phase=selection.phase,
+                    latest_state_sha=selection.state_sha,
+                    parent_thread_id=repo_thread.thread_id,
+                )
+            active = pr_thread or repo_thread
+            await self._inject_runtime_context(active.thread_id, selection, run_id)
+            return repo_thread, pr_thread
+
+        try:
+            repo_thread, pr_thread = await _ensure_and_inject()
+        except JsonRpcError as exc:
+            if not _is_stale_thread_error(exc):
+                raise
+            # Codex rejected the cached thread id. Invalidate, log, retry once.
+            self.timeline.event(
+                "tick.thread-cache-invalidated",
+                run_id=run_id,
+                repo=repo,
+                pr=selection.pr,
+                reason="codex rejected cached thread id",
+                error=str(exc),
+            )
+            self.store.forget_repo_thread(repo)
+            if selection.pr is not None:
+                self.store.forget_pr_thread(repo, selection.pr)
+            repo_thread, pr_thread = await _ensure_and_inject()
+
+        active_thread = pr_thread or repo_thread
         turn = await self.appserver.run_turn(
             thread_id=active_thread.thread_id,
             cwd=self.config.project_root,
@@ -393,15 +454,43 @@ class Daemon:
 
     # -------------------------------------------------- thread plumbing
 
+    def _cached_thread_id_is_valid(self, thread_id: str) -> bool:
+        """Validate a cached thread id against the current server mode.
+
+        In live mode (real codex app-server), thread ids MUST be UUIDs;
+        synthetic offline/harness ids like `thr_xxxxx` are silently invalid
+        until we send them and codex rejects with `invalid thread id`.
+
+        In offline/harness mode, anything non-empty is fine — the
+        OfflineAppServer doesn't validate format.
+        """
+        if not thread_id:
+            return False
+        if self.config.offline:
+            return True
+        return _is_live_thread_id(thread_id)
+
     async def _ensure_repo_thread(self, repo: str) -> ThreadHandle:
         cached = self.store.get_repo_thread(repo)
         if cached is not None:
-            return ThreadHandle(
-                thread_id=cached.root_thread_id,
-                cwd=self.config.project_root,
-                approval_policy=self.config.approval_mode,
-                sandbox=self.config.sandbox,
+            if self._cached_thread_id_is_valid(cached.root_thread_id):
+                return ThreadHandle(
+                    thread_id=cached.root_thread_id,
+                    cwd=self.config.project_root,
+                    approval_policy=self.config.approval_mode,
+                    sandbox=self.config.sandbox,
+                )
+            # Stale cache (typically: offline-mode synthetic ID `thr_xxx`
+            # left behind from a prior offline run, now hitting a live
+            # codex server that only accepts UUIDs). Drop and recreate.
+            self.timeline.event(
+                "tick.thread-cache-invalidated",
+                repo=repo,
+                kind="repo",
+                stale_thread_id=cached.root_thread_id,
+                reason="format mismatch for current server mode",
             )
+            self.store.forget_repo_thread(repo)
         seed = (
             f"You are the PR Jangler control thread for {repo}. Maintain the "
             f"backlog pipeline, but never bypass PR Jangler's state machine. "
@@ -446,19 +535,29 @@ class Daemon:
     ) -> ThreadHandle:
         cached = self.store.get_pr_thread(repo, pr)
         if cached is not None:
-            # Refresh phase / sha cache for downstream context
-            self.store.upsert_pr_thread(
-                repo, pr, cached.pr_thread_id,
-                latest_phase=latest_phase,
-                latest_state_sha=latest_state_sha,
+            if self._cached_thread_id_is_valid(cached.pr_thread_id):
+                # Refresh phase / sha cache for downstream context
+                self.store.upsert_pr_thread(
+                    repo, pr, cached.pr_thread_id,
+                    latest_phase=latest_phase,
+                    latest_state_sha=latest_state_sha,
+                )
+                return ThreadHandle(
+                    thread_id=cached.pr_thread_id,
+                    cwd=self.config.project_root,
+                    approval_policy=self.config.approval_mode,
+                    sandbox=self.config.sandbox,
+                    parent_thread_id=parent_thread_id,
+                )
+            # Stale cache; drop and recreate. See `_ensure_repo_thread`.
+            self.timeline.event(
+                "tick.thread-cache-invalidated",
+                repo=repo, pr=pr,
+                kind="pr",
+                stale_thread_id=cached.pr_thread_id,
+                reason="format mismatch for current server mode",
             )
-            return ThreadHandle(
-                thread_id=cached.pr_thread_id,
-                cwd=self.config.project_root,
-                approval_policy=self.config.approval_mode,
-                sandbox=self.config.sandbox,
-                parent_thread_id=parent_thread_id,
-            )
+            self.store.forget_pr_thread(repo, pr)
         seed = (
             f"You are the PR Jangler thread for PR #{pr} in {repo}. "
             "Cache-first: read per-PR artifacts before touching GitHub. "

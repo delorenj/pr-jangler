@@ -159,6 +159,12 @@ class AgentdStore:
                 (repo, thread_id, _now(), _now()),
             )
 
+    def forget_repo_thread(self, repo: str) -> None:
+        """Drop the cached repo thread for `repo`. Used when codex rejects the
+        thread id (e.g. stale offline-mode cache after switching to live)."""
+        with self._tx() as conn:
+            conn.execute("DELETE FROM repo_threads WHERE repo = ?", (repo,))
+
     def get_repo_thread(self, repo: str) -> RepoThread | None:
         with self._lock:
             conn = self._connect()
@@ -199,6 +205,16 @@ class AgentdStore:
                 """,
                 (repo, pr_number, thread_id, latest_phase, latest_state_sha,
                  _now(), _now()),
+            )
+
+    def forget_pr_thread(self, repo: str, pr_number: int) -> None:
+        """Drop the cached PR thread for `(repo, pr_number)`. Same use case
+        as `forget_repo_thread`: stale cache after server mode switch or
+        codex thread cleanup."""
+        with self._tx() as conn:
+            conn.execute(
+                "DELETE FROM pr_threads WHERE repo = ? AND pr_number = ?",
+                (repo, pr_number),
             )
 
     def get_pr_thread(self, repo: str, pr_number: int) -> PrThread | None:
