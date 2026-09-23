@@ -1,0 +1,14 @@
+{
+  "project_name": "pr-jangler",
+  "project_description": "An autonomous workflow for your GitHub PR backlog.",
+  "project_id": "pr-jangler",
+  "repo_path": "/home/delorenj/code/pr-jangler",
+  "ticket_provider": {
+    "type": "plane",
+    "workspace": "",
+    "identifier": "",
+    "board_id": "",
+    "state": "planned"
+  },
+  "agents": {}
+}
